@@ -3,6 +3,7 @@ const cors = require('cors');
 require('dotenv').config();
 const { MongoClient, ServerApiVersion } = require('mongodb');
 const { ObjectId } = require('mongodb');
+const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -22,25 +23,44 @@ const client = new MongoClient(uri, {
   }
 });
 
-//middleware
-const verifyToken = (req, res, next) => {
-    // Access with lowercase 'authorization'
-    const authHeader = req.headers['authorization']; 
-    
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-        const token = authHeader.split(' ')[1];
-        req.userToken = token;
-        console.log("Received token:", req.userToken);
-    } else {
-        req.userToken = null;
-        console.log("No token received");
+const JWKS = createRemoteJWKSet(
+  new URL("http://localhost:3000/api/auth/jwks")
+);
+
+// Corrected Middleware
+const verifyToken = async (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    console.log("Auth header received:", authHeader);
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        console.log("Missing or malformed Authorization header");
+        return res.status(401).json({ message: "unauthorized" });
     }
-    next();
+
+    const token = authHeader.split(' ')[1];
+    
+    if (!token) {
+        console.log("Token missing after Bearer");
+        return res.status(401).json({ message: "unauthorized" });
+    }
+
+    try {
+        // Verify the token using the JWKS
+        const { payload } = await jwtVerify(token, JWKS);
+        
+        req.user = payload; 
+        req.userToken = token;
+        
+        console.log("Token verified successfully");
+        next();
+    } catch (err) {
+        console.error("Token verification failed:", err.message);
+        return res.status(401).json({ message: "unauthorized - invalid token" });
+    }
 };
 
-app.use(verifyToken);
-
-
+// Uncomment the line below if you want to protect ALL routes:
+// app.use(verifyToken);
 
 async function run() {
   try {
@@ -55,70 +75,51 @@ async function run() {
       res.send('RecipeHub Server is running!');
     });
 
-    app.post('/foods', async (req, res) => {
+    app.post('/foods', verifyToken, async (req, res) => {
       const food = req.body;
       const result = await recipeCollection.insertOne(food);
       res.send(result);
     });
 
-   
     app.get("/recips", async (req, res) => {
-    const { search } = req.query;
-    //console.log(search)
-    
+      const { search } = req.query;
 
-    const query = {};
-    if (search && search !="undefined") {
-        query.$or = [
-            { title: { $regex: search, $options: 'i' } },
-            { description: { $regex: search, $options: 'i' } }
-        ];
-    }
+      const query = {};
+      if (search && search !== "undefined") {
+          query.$or = [
+              { title: { $regex: search, $options: 'i' } },
+              { description: { $regex: search, $options: 'i' } }
+          ];
+      }
 
-   
+      let result = await recipeCollection.find(query).toArray();
 
-    let result = await recipeCollection.find(query).toArray();
+      if (search && result.length === 0) {
+          result = await recipeCollection.find({}).toArray();
+      }
 
-    // FALLBACK: If search term resulted in 0 items, return all items instead
-    if (search && result.length === 0) {
-        result = await recipeCollection.find({}).toArray();
-    }
+      res.send(result);
+    });
 
-    res.send(result);
-});
+    app.get("/recipe/:id", async (req, res) => {
+      try {
+          const { id } = req.params;
+          
+          if (!ObjectId.isValid(id)) {
+              return res.status(400).send({ message: "Invalid ID format" });
+          }
 
-// app.get("/recipe/:id",async(req,res)=>{
-//       const {id}=req.params;
-
-//       const result=await recipeCollection.findOne({_id:new ObjectId(id)})
-
-//       res.send(result)
-//     })
-
-
-app.get("/recipe/:id", async (req, res) => {
-    try {
-        const { id } = req.params;
-        const token = req.userToken; // The token sent from client
-        
-        // Log it to verify it arrived
-        console.log("Received token:", token);
-
-        if (!ObjectId.isValid(id)) {
-            return res.status(400).send({ message: "Invalid ID format" });
-        }
-
-        const result = await recipeCollection.findOne({ _id: new ObjectId(id) });
-        
-        if (!result) {
-            return res.status(404).send({ message: "Recipe not found" });
-        }
-        
-        res.send(result);
-    } catch (error) {
-        res.status(500).send({ message: "Server error" });
-    }
-});
+          const result = await recipeCollection.findOne({ _id: new ObjectId(id) });
+          
+          if (!result) {
+              return res.status(404).send({ message: "Recipe not found" });
+          }
+          
+          res.send(result);
+      } catch (error) {
+          res.status(500).send({ message: "Server error" });
+      }
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
@@ -134,3 +135,4 @@ run().catch(console.dir);
 app.listen(port, () => {
   console.log(`Server is listening on port ${port}`);
 });
+//git rm --cached .env
