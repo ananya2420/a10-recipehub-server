@@ -1,8 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
-const { MongoClient, ServerApiVersion } = require('mongodb');
-const { ObjectId } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
 
 const app = express();
@@ -27,44 +26,26 @@ const JWKS = createRemoteJWKSet(
   new URL("http://localhost:3000/api/auth/jwks")
 );
 
-// Corrected Middleware
+// Middleware
 const verifyToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
-    console.log("Auth header received:", authHeader);
-
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        console.log("Missing or malformed Authorization header");
         return res.status(401).json({ message: "unauthorized" });
     }
 
     const token = authHeader.split(' ')[1];
-    
-    if (!token) {
-        console.log("Token missing after Bearer");
-        return res.status(401).json({ message: "unauthorized" });
-    }
-
     try {
-        // Verify the token using the JWKS
         const { payload } = await jwtVerify(token, JWKS);
-        
         req.user = payload; 
         req.userToken = token;
-        
-        console.log("Token verified successfully");
         next();
     } catch (err) {
-        console.error("Token verification failed:", err.message);
         return res.status(401).json({ message: "unauthorized - invalid token" });
     }
 };
 
-// Uncomment the line below if you want to protect ALL routes:
-// app.use(verifyToken);
-
 async function run() {
   try {
-    // Connect the client to the server
     await client.connect();
     
     const database = client.db("recipehub_db");
@@ -82,46 +63,52 @@ async function run() {
     });
 
     app.get("/recips", async (req, res) => {
-      const { search } = req.query;
-
       const query = {};
+      const { search, page, perPage } = req.query;
+
+      // Handle search filter
       if (search && search !== "undefined") {
-          query.$or = [
-              { title: { $regex: search, $options: 'i' } },
-              { description: { $regex: search, $options: 'i' } }
-          ];
+        query.$or = [
+            { title: { $regex: search, $options: 'i' } },
+            { description: { $regex: search, $options: 'i' } }
+        ];
       }
 
-      let result = await recipeCollection.find(query).toArray();
+      // Handle pagination
+      if (page) {
+        const pageNum = parseInt(page) || 1;
+        const limitNum = parseInt(perPage) || 10;
+        const skipItems = (pageNum - 1) * limitNum;
 
+        const cursor = recipeCollection.find(query).skip(skipItems).limit(limitNum);
+        const receips = await cursor.toArray();
+        return res.send(receips);
+      }
+
+      // Default return
+      let result = await recipeCollection.find(query).toArray();
       if (search && result.length === 0) {
           result = await recipeCollection.find({}).toArray();
       }
-
       res.send(result);
     });
 
     app.get("/recipe/:id", async (req, res) => {
       try {
           const { id } = req.params;
-          
           if (!ObjectId.isValid(id)) {
               return res.status(400).send({ message: "Invalid ID format" });
           }
-
           const result = await recipeCollection.findOne({ _id: new ObjectId(id) });
-          
           if (!result) {
               return res.status(404).send({ message: "Recipe not found" });
           }
-          
           res.send(result);
       } catch (error) {
           res.status(500).send({ message: "Server error" });
       }
     });
 
-    // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } catch (err) {
@@ -131,9 +118,7 @@ async function run() {
 
 run().catch(console.dir);
 
-// Start the server
 app.listen(port, () => {
   console.log(`Server is listening on port ${port}`);
 });
-
 //git rm --cached .env
