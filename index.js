@@ -22,6 +22,26 @@ const client = new MongoClient(uri, {
   }
 });
 
+//middleware
+const verifyToken = (req, res, next) => {
+    // Access with lowercase 'authorization'
+    const authHeader = req.headers['authorization']; 
+    
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.split(' ')[1];
+        req.userToken = token;
+        console.log("Received token:", req.userToken);
+    } else {
+        req.userToken = null;
+        console.log("No token received");
+    }
+    next();
+};
+
+app.use(verifyToken);
+
+
+
 async function run() {
   try {
     // Connect the client to the server
@@ -79,8 +99,11 @@ async function run() {
 app.get("/recipe/:id", async (req, res) => {
     try {
         const { id } = req.params;
+        const token = req.userToken; // The token sent from client
         
-        // Safety: check if ID format is valid before querying
+        // Log it to verify it arrived
+        console.log("Received token:", token);
+
         if (!ObjectId.isValid(id)) {
             return res.status(400).send({ message: "Invalid ID format" });
         }
