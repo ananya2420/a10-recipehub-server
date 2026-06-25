@@ -23,7 +23,7 @@ const client = new MongoClient(uri, {
 });
 
 const JWKS = createRemoteJWKSet(
-  new URL("http://localhost:3000/api/auth/jwks")
+  new URL("https://a10-recipehub-client.vercel.app/api/auth/jwks")
 );
 
 // Middleware
@@ -45,18 +45,19 @@ const verifyToken = async (req, res, next) => {
 };
 
 // Connect to MongoDB
-client.connect(() => {
-    console.log('Connected to MongoDB');
-}).catch(console.dir);
+// client.connect(() => {
+//     console.log('Connected to MongoDB');
+// }).catch(console.dir);
 
 
 // Define these inside the scope where the client is available
+
+
+ async function run() {
+  try {
+// //     await client.connect();
 const database = client.db("recipehub_db");
 const recipeCollection = database.collection("recips");
-
-// // async function run() {
-// //   try {
-// //     await client.connect();
 
 // Routes
 app.get('/', (req, res) => {
@@ -112,15 +113,13 @@ app.get("/recipe/:id", async (req, res) => {
   }
 });
 
-// //   } catch (err) {
-// //     console.error("Failed to connect to MongoDB:", err);
-// //   }
-// // }
-// // run().catch(console.dir);
+  } catch (err) {
+    console.error("Failed to connect to MongoDB:", err);
+  }
+}
+run().catch(console.dir);
 
 app.listen(port, () => {
   console.log(`Server is listening on port ${port}`);
 });
-
-
 //git rm --cached .env
